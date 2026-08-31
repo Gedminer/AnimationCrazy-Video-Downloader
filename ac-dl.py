@@ -29,7 +29,9 @@ from acdl.browser import BrowserSession  # noqa: E402
 from acdl.config import Config, load, save  # noqa: E402
 from acdl.downloader import Downloader, TaskResult, summarize  # noqa: E402
 from acdl.extractor import StreamExtractor, sn_from_url  # noqa: E402
-from acdl.series import display_table, episode_title, select_episodes  # noqa: E402
+from acdl.series import (  # noqa: E402
+    _match_numbers, display_table, episode_title, parse_selection, select_episodes,
+)
 from acdl.utils import (  # noqa: E402
     ask, countdown, error, info, ok, sanitize, step, warn,
 )
@@ -145,12 +147,28 @@ def cmd_info(cfg: Config, args) -> int:
             "animeSn": anime.anime_sn,
             "title": anime.bangumi_name,
             "totalEpisode": anime.total_episode,
+            "bilingual": anime.bilingual,
+            "audioLabels": anime.audio_labels,
+            "groups": {
+                k: [
+                    {"episode": e.episode, "videoSn": e.video_sn}
+                    for e in anime.groups.get(k, [])
+                ]
+                for k in sorted(anime.groups)
+            },
             "episodes": [
-                {"episode": e.episode, "videoSn": e.video_sn}
+                {
+                    "episode": e.episode,
+                    "videoSn": e.video_sn,
+                    "group": anime.group_of(e.video_sn),
+                    "audio": anime.group_label(anime.group_of(e.video_sn) or ""),
+                }
                 for e in anime.all_episodes
             ],
         }
-        Path(args.dump_json).write_text(
+        out_path = Path(args.dump_json)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         ok(f"已导出 JSON: {args.dump_json}")
@@ -181,6 +199,123 @@ def args_wait(cfg: Config) -> int:
     return cfg.ad_wait
 
 
+# ---------------------------------------------------------------- 配音（双语）选择
+
+
+def _match_audio_groups(info, token: str) -> list[str]:
+    """将 --audio/--lang 参数解析为分组键列表
+
+    支持：分组键(0/3)、名称片段(中文/原音/日语)、all(全部)。
+    """
+    token = (token or "").strip()
+    if token.lower() == "all":
+        return list(info.groups.keys())
+    if token in info.groups:
+        return [token]
+    matched = [k for k in info.groups if token and token in (info.group_label(k) or "")]
+    return matched
+
+
+def _prompt_audio(info) -> str:
+    """交互式选择配音类型，返回分组键"""
+    opts = list(info.groups.keys())
+    print(f"\n{Fore.CYAN}检测到双语作品，请选择配音类型：{Style.RESET_ALL}")
+    for i, k in enumerate(opts, 1):
+        print(f"  {i}. {info.group_label(k)}")
+    while True:
+        choice = ask("输入序号或名称", "1")
+        if choice.isdigit() and 1 <= int(choice) <= len(opts):
+            return opts[int(choice) - 1]
+        for k in opts:
+            if choice and choice in (info.group_label(k) or ""):
+                return k
+        warn("无效选择，请重试")
+
+
+def _resolve_audio_groups(
+    info, audio_arg, target_sn, cfg, interactive: bool, sn_default: bool = False
+) -> list[str]:
+    """确定要下载的分组键
+
+    - 指定 --audio：按 _match_audio_groups 解析（含 all）。
+    - 单分组：直接返回。
+    - 未指定且 sn_default(dl)：取输入 sn 所属分组。
+    - 未指定且交互：弹窗让用户选。
+    - 未指定且非交互：用 config.default_audio；再不行回退首个分组。
+    """
+    if audio_arg:
+        matched = _match_audio_groups(info, audio_arg)
+        if not matched:
+            opts = " / ".join(f"{k}={info.group_label(k)}" for k in info.groups)
+            raise ValueError(f"未找到匹配「{audio_arg}」的配音类型，可选: {opts}")
+        return matched
+
+    keys = list(info.groups.keys())
+    if len(keys) == 1:
+        return keys
+    if sn_default and target_sn and str(target_sn).isdigit():
+        g = info.group_of(int(target_sn))
+        if g is not None:
+            return [g]
+    if interactive:
+        return [_prompt_audio(info)]
+    matched = _match_audio_groups(info, cfg.default_audio)
+    if matched:
+        return matched
+    return keys[:1]
+
+
+def _dedupe(chosen, info) -> list:
+    seen = set()
+    out = []
+    for e in chosen:
+        if e.video_sn not in seen:
+            seen.add(e.video_sn)
+            out.append(e)
+    order = {e.video_sn: i for i, e in enumerate(info.all_episodes)}
+    out.sort(key=lambda e: order.get(e.video_sn, 0))
+    return out
+
+
+def _select_chosen(info, args, batch: bool, groups_to_use: list[str], target_sn) -> list:
+    """根据分组与选集表达式，返回最终要下载的剧集列表"""
+    if batch:
+        if len(groups_to_use) == 1:
+            return select_episodes(
+                info, args.select, interactive=not args.yes, group_filter=groups_to_use
+            )
+        # --audio all：同一组集号跨所有分组下载
+        total = max((e.episode for e in info.all_episodes), default=0)
+        numbers = parse_selection(args.select or "all", total)
+        chosen = []
+        for k in groups_to_use:
+            chosen.extend(_match_numbers(info.groups.get(k, []), numbers))
+        return _dedupe(chosen, info)
+
+    # dl 单集
+    if args.audio and args.audio.lower() == "all":
+        ep_num = next(
+            (e.episode for e in info.all_episodes if str(e.video_sn) == target_sn), None
+        )
+        return [e for k in groups_to_use for e in info.groups.get(k, []) if e.episode == ep_num]
+    g0 = groups_to_use[0]
+    ep_num = next(
+        (e.episode for e in info.all_episodes if str(e.video_sn) == target_sn), None
+    )
+    chosen = [e for e in info.groups.get(g0, []) if e.episode == ep_num]
+    if not chosen:
+        chosen = [e for e in info.groups.get(g0, []) if str(e.video_sn) == target_sn]
+    return chosen
+
+
+def _ep_audio_label(info, ep) -> str:
+    """该集文件名所需的配音标签（仅双语作品才追加，避免与单语言冲突）"""
+    if not info.audio_labels:
+        return ""
+    g = info.group_of(ep.video_sn)
+    return info.group_label(g) if g is not None else ""
+
+
 def cmd_download(cfg: Config, args, batch: bool = False) -> int:
     """下载单集或批量下载"""
     re_path = detect_re(cfg, args.re_path)
@@ -201,13 +336,24 @@ def cmd_download(cfg: Config, args, batch: bool = False) -> int:
 
     ok(f"{anime.bangumi_name}  共 {len(anime.all_episodes)} 集")
 
-    if batch:
-        chosen = select_episodes(anime, args.select, interactive=not args.yes)
-    else:
-        target_sn = sn_from_url(args.target)
-        chosen = [e for e in anime.all_episodes if str(e.video_sn) == target_sn]
-        if not chosen:
-            chosen = anime.all_episodes[-1:]
+    target_sn = sn_from_url(args.target)
+    try:
+        groups_to_use = _resolve_audio_groups(
+            anime, getattr(args, "audio", None), target_sn, cfg,
+            interactive=not args.yes, sn_default=not batch,
+        )
+    except ValueError as exc:
+        error(str(exc))
+        return 1
+
+    if anime.audio_labels and len(anime.groups) > 1:
+        info("配音类型: " + " / ".join(anime.group_label(k) for k in groups_to_use))
+
+    try:
+        chosen = _select_chosen(anime, args, batch, groups_to_use, target_sn)
+    except ValueError as exc:
+        error(str(exc))
+        return 1
 
     if not chosen:
         error("没有选中任何剧集")
@@ -215,7 +361,8 @@ def cmd_download(cfg: Config, args, batch: bool = False) -> int:
 
     print(f"\n{Style.BRIGHT}待下载 {len(chosen)} 集:{Style.RESET_ALL}")
     for e in chosen:
-        print(f"  - {episode_title(anime, e, cfg.zerofill)}  (sn={e.video_sn})")
+        label = _ep_audio_label(anime, e)
+        print(f"  - {episode_title(anime, e, cfg.zerofill, audio_label=label)}  (sn={e.video_sn})")
     if not args.yes:
         if ask("确认开始下载？(y/n)", "y").lower() not in ("y", "yes", ""):
             info("已取消")
@@ -251,7 +398,8 @@ def cmd_download(cfg: Config, args, batch: bool = False) -> int:
         client.set_cookies(cookies)
 
         for idx, ep in enumerate(chosen, 1):
-            name = episode_title(anime, ep, cfg.zerofill)
+            label = _ep_audio_label(anime, ep)
+            name = episode_title(anime, ep, cfg.zerofill, audio_label=label)
             step(f"[{idx}/{len(chosen)}] {name}  (sn={ep.video_sn})")
 
             state = _capture_one(session, extractor, ep.video_sn, cfg, cookies)
@@ -393,8 +541,12 @@ def build_parser() -> argparse.ArgumentParser:
             "示例:\n"
             "  ac-dl.py login                        首次登录\n"
             "  ac-dl.py info 50646                   查看作品的全部剧集\n"
-            "  ac-dl.py dl 50646                     下载单集\n"
+            "  ac-dl.py info 50633                   查看双语作品的各配音信息\n"
+            "  ac-dl.py dl 50633                     下载该 sn 所属语种（中文配音）\n"
+            "  ac-dl.py dl 50633 --audio 0           指定下载原音(日语)\n"
+            "  ac-dl.py dl 50633 --audio all         原音与中文配音都下\n"
             "  ac-dl.py batch 50646 --select 1-12    批量下载 1-12 集\n"
+            "  ac-dl.py batch 50633 --audio 中文配音 --select 1-8  指定配音批量下\n"
             "  ac-dl.py batch 50646 --select all -y  非交互下载全集\n"
         ),
     )
@@ -425,11 +577,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("dl", parents=[common], help="下载单集")
     p.add_argument("target", help="播放页 URL 或 sn 号")
+    p.add_argument("--audio", "--lang", dest="audio", default=None,
+                   help="配音类型：分组键(0/3)、名称片段(中文/原音/日语) 或 all(两种都下)；缺省=该 sn 所属语种")
 
     p = sub.add_parser("batch", parents=[common], help="批量下载剧集")
     p.add_argument("target", help="作品页/播放页 URL 或 sn 号")
     p.add_argument("--select", default="all",
                    help="选集表达式：all / 1-12 / 1,3,5-8 / 8- / last")
+    p.add_argument("--audio", "--lang", dest="audio", default=None,
+                   help="配音类型：分组键(0/3)、名称片段(中文/原音/日语) 或 all(两种都下)；缺省=交互选择/默认配置")
 
     p = sub.add_parser("manual", parents=[common], help="手动输入模式（旧版回退）")
     sub.add_parser("config", parents=[common], help="查看配置").add_argument(

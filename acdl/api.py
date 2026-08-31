@@ -26,9 +26,51 @@ API_BASE = "https://api.gamer.com.tw"
 VIDEO_API = API_BASE + "/anime/v1/video.php"
 DEVICE_API = "https://ani.gamer.com.tw/ajax/getdeviceid.php"
 
-# 标题形如 "GRAND BLUE 碧藍之海 3 [8]"
+# 标题形如 "GRAND BLUE 碧藍之海 3 [8]" 或 "... [38] [中文配音]"
 _TITLE_EP_RE = re.compile(r"^(?P<name>.*?)\s*\[(?P<ep>\d+)\]\s*$")
+_TRAIL_BRACKET_RE = re.compile(r"\s*\[[^\]]*\]\s*$")
 _DEVICEID_RE = re.compile(r"[0-9a-f]{32,}")
+
+
+def _strip_title_suffix(title: str) -> str:
+    """去掉作品名末尾可能携带的 [集数] / [配音] 等方括号后缀
+
+    巴哈姆特接口对部分作品（尤其双语）的 anime.title 会带上
+    "... [38] [中文配音]"，直接用作目录名会很脏，这里逐层剥离直到无可去。
+    """
+    t = (title or "").strip()
+    prev = None
+    while t != prev:
+        prev = t
+        m = _TRAIL_BRACKET_RE.search(t)
+        if m and m.start() > 0:
+            t = t[: m.start()].strip()
+        else:
+            break
+    return t
+
+# 用于从单集标题末尾的 [...] 后缀推断配音类型
+_LANG_BRACKET_RE = re.compile(r"\[([^\[\]]*)\]")
+
+
+def _infer_audio_label(title: str) -> str:
+    """从单集标题推断该分组（配音）的标签
+
+    巴哈姆特接口并不直接给出「分组 -> 语种」的映射，只能从每集标题末尾的
+    [...] 后缀判断，例如：
+        "... [38] [中文配音]"  -> 中文配音
+        "... [38]"             -> 原音(日语)   （无后缀默认原音）
+    返回用户指定的标准文案：原音(日语) / 中文配音。
+    """
+    if not title:
+        return "原音(日语)"
+    brackets = _LANG_BRACKET_RE.findall(title)
+    tail = brackets[-1] if brackets else ""
+    if any(k in tail for k in ("中文", "國語", "国语", "粵語", "粤语", "中文配音")):
+        return "中文配音"
+    if any(k in tail for k in ("日語", "日语")):
+        return "原音(日语)"
+    return "原音(日语)"
 
 
 @dataclass
@@ -51,34 +93,54 @@ class AnimeInfo:
     total_episode: int = 0
     groups: dict[str, list[Episode]] = field(default_factory=dict)
     current_video_sn: int = 0
+    bilingual: bool = False
+    audio_labels: dict[str, str] = field(default_factory=dict)
 
     # ---------------------------------------------------------- 名称处理
 
     @property
     def bangumi_name(self) -> str:
-        """作品名（去掉末尾的 [集数]）"""
-        m = _TITLE_EP_RE.match(self.raw_title or "")
-        return (m.group("name") if m else (self.raw_title or "")).strip()
+        """作品名（去掉末尾的 [集数] / [配音] 等方括号后缀）"""
+        return _strip_title_suffix(self.raw_title) or (self.raw_title or "")
 
     @property
     def all_episodes(self) -> list[Episode]:
         """所有分组的剧集，按分组键与集号排序"""
-        eps: list[Episode] = []
-        for key in sorted(self.groups.keys(), key=lambda k: (len(k), k)):
-            eps.extend(sorted(self.groups[key], key=lambda e: e.episode))
-        return eps
+        return self.episodes_of()
 
     @property
     def multi_group(self) -> bool:
         return len(self.groups) > 1
 
+    def group_of(self, video_sn: int) -> str | None:
+        """返回某 videoSn 所属的分组键（用于区分双语配音）"""
+        for key, items in self.groups.items():
+            if any(e.video_sn == video_sn for e in items):
+                return key
+        return None
+
+    def group_label(self, key: str) -> str:
+        """分组键对应的可读配音标签，如 原音(日语) / 中文配音"""
+        return self.audio_labels.get(key, key)
+
+    def episodes_of(self, group_keys: list[str] | None = None) -> list[Episode]:
+        """取指定分组的剧集（默认全部），按分组顺序与集号排序"""
+        keys = group_keys if group_keys is not None else list(self.groups.keys())
+        order = {k: i for i, k in enumerate(self.groups.keys())}
+        eps: list[Episode] = []
+        for k in keys:
+            if k in self.groups:
+                eps.extend(self.groups[k])
+        eps.sort(key=lambda e: (order.get(self.group_of(e.video_sn) or "", 1 << 30), e.episode))
+        return eps
+
     def label(self, ep: Episode) -> str:
         """带分组前缀的显示名，多分组时用于消歧"""
         if not self.multi_group:
             return str(ep.episode)
-        for key, items in self.groups.items():
-            if any(e.video_sn == ep.video_sn for e in items):
-                return f"{key}-{ep.episode}"
+        g = self.group_of(ep.video_sn)
+        if g is not None:
+            return f"{g}-{ep.episode}"
         return str(ep.episode)
 
 
@@ -181,6 +243,7 @@ class AniClient:
             raw_title=str(anime.get("title") or video.get("title") or ""),
             total_episode=int(anime.get("totalEpisode") or 0),
             current_video_sn=int(video.get("videoSn") or 0),
+            bilingual=bool((anime.get("highlightTag") or {}).get("bilingual")),
         )
 
         raw_groups = anime.get("episodes") or {}
@@ -217,6 +280,20 @@ class AniClient:
                     continue
             if bucket:
                 info.groups["0"] = bucket
+
+        # 双语（或多分组）时，逐分组取首集标题推断配音标签。
+        # 单分组（非双语）无需额外接口调用，audio_labels 保持为空。
+        need_labels = info.bilingual or len(info.groups) > 1
+        if need_labels:
+            for key, items in info.groups.items():
+                if not items:
+                    continue
+                try:
+                    vd = self.get_video(video_sn=items[0].video_sn)
+                    vtitle = (vd.get("video") or {}).get("title") or ""
+                except Exception:  # noqa: BLE001
+                    vtitle = ""
+                info.audio_labels[key] = _infer_audio_label(vtitle)
 
         # animeSn 查询时标题带的是第一集的 [1]，需要用当前集信息修正不影响作品名解析
         return info

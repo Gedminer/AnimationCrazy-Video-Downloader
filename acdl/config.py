@@ -35,6 +35,9 @@ class Config:
     # 清晰度偏好（留空则取最佳）
     resolution: str = ""
 
+    # 配音偏好（双语作品默认下载的配音类型；留空或无法匹配时回退原音）
+    default_audio: str = "原音(日语)"
+
     # 网络
     user_agent: str = DEFAULT_UA
     proxy: str = ""

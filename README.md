@@ -38,6 +38,7 @@
 | 防重复 | `skip_existing` 命中已存在产物直接跳过 |
 | 双登录态 | `profile`（持久化目录）与 `cdp`（接管已开 Chrome） |
 | 稳定解密 | 显式 key/IV + `_locked` 锁清晰度，规避 Padding 错误 |
+| 双语配音 | `info` 分块显示各配音；`dl`/`batch` 用 `--audio` 选原音/中文/全部 |
 | 跨平台 | 纯 Python CLI，核心逻辑不依赖特定 OS（弹窗特性 Windows 默认开） |
 
 ---
@@ -115,6 +116,12 @@ playwright install chromium
 |---|---|---|
 | `resolution` | 指定清晰度（如 `1080` / `720` / `360`），留空取最佳 | `` |
 
+### 配音偏好
+
+| 配置 | 说明 | 默认 |
+|---|---|---|
+| `default_audio` | 双语作品**批量下载**时未指定 `--audio` 且非交互(`-y`)下使用的默认配音；可填 `原音(日语)` / `中文配音` 或分组键（如 `0` / `3`），无法匹配时回退原音 | `原音(日语)` |
+
 ### 网络
 
 | 配置 | 说明 | 默认 |
@@ -150,6 +157,7 @@ playwright install chromium
 --resolution RES       覆盖清晰度，如 1080
 --re-path PATH         N_m3u8DL-RE 可执行文件路径
 -y, --yes             非交互模式（不再询问确认）
+--audio / --lang      配音类型（仅双语作品）：分组键(0/3)、名称片段(中文/原音/日语) 或 all（两种都下）
 ```
 
 ### 1. 登录
@@ -189,6 +197,30 @@ python ac-dl.py dl 50646            # 默认下载该作品最新一集
 python ac-dl.py batch 50646 --select 1-12      # 下载第 1~12 集
 python ac-dl.py batch 50646 --select all -y    # 非交互下载全部集
 ```
+
+### 4.1 双语作品（多配音）下载
+
+动画疯部分番剧提供**双语配音**（同一集对应「原音(日语)」与「中文配音」两个独立播放地址）。
+`info` 会按配音类型分块展示；下载时通过 `--audio`（`--lang` 等价）选择：
+
+```bash
+python ac-dl.py dl 50633                 # 默认下载该 sn 所属语种（50633 是中文配音）
+python ac-dl.py dl 50633 --audio 0       # 指定原音(日语)（分组键 0）
+python ac-dl.py dl 50633 --audio 中文配音  # 按名称片段指定（中文 / 原音 / 日语 均可）
+python ac-dl.py dl 50633 --audio all     # 同一集两种配音都下（文件名带 [原音(日语)] / [中文配音] 区分）
+
+python ac-dl.py batch 50633 --audio 中文配音 --select 1-8   # 批量也用 --audio 限定配音
+python ac-dl.py batch 50633 --select 1-8                    # 交互模式先选配音；-y 时用 config 的 default_audio
+```
+
+| `--audio` 取值 | 含义 |
+|---|---|
+| 不写 | 单集 `dl` 默认下该 sn 自己的语种；批量 `batch` 默认下「配置里的默认配音」 |
+| `0` / `3` | 分组键，直接指定某一配音 |
+| `中文` / `原音` / `日语` 等片段 | 按配音标签名称匹配 |
+| `all` | 两种配音都下载 |
+
+> `config.ini` 的 `default_audio`（默认 `原音(日语)`）决定：批量未指定 `--audio` 且非交互时的默认配音。
 
 **选集表达式**：
 

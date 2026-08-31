@@ -68,11 +68,22 @@ def parse_selection(spec: str, total: int) -> list[int]:
     return valid
 
 
-def display_table(info: AnimeInfo, highlight: Iterable[int] = ()) -> None:
-    """打印剧集列表"""
+def display_table(
+    info: AnimeInfo,
+    highlight: Iterable[int] = (),
+    group_filter: list[str] | None = None,
+) -> None:
+    """打印剧集列表
+
+    group_filter 非空时只显示指定分组（双语作品下载前选集用）。
+    双语作品按配音标签分块展示（如【原音(日语)】/【中文配音】）。
+    """
     marks = set(highlight)
-    eps = info.all_episodes
-    if not eps:
+    if group_filter:
+        shown = {k: info.groups.get(k, []) for k in group_filter if k in info.groups}
+    else:
+        shown = info.groups
+    if not shown:
         warn("该作品没有可用的剧集列表")
         return
 
@@ -81,22 +92,34 @@ def display_table(info: AnimeInfo, highlight: Iterable[int] = ()) -> None:
     meta = []
     if info.anime_sn:
         meta.append(f"animeSn={info.anime_sn}")
-    if info.total_episode:
-        meta.append(f"共 {info.total_episode} 集")
-    else:
-        meta.append(f"共 {len(eps)} 集")
-    if info.multi_group:
-        meta.append(f"分组: {', '.join(sorted(info.groups))}")
+    distinct = max((e.episode for v in shown.values() for e in v), default=0)
+    meta.append(f"共 {distinct} 集")
+    if info.audio_labels:
+        langs = " / ".join(info.group_label(k) for k in shown)
+        meta.append(f"配音: {langs}")
+    elif len(shown) > 1:
+        meta.append(f"分组: {', '.join(sorted(shown))}")
     print(f"{Fore.CYAN}信息:{Style.RESET_ALL} {'  '.join(meta)}")
 
-    # 每行 8 集；标记放在数字之后，避免与相邻数字混淆
     print()
-    maxlen = max(len(info.label(e)) for e in eps)
+    # 单分组（或单语言作品）直接打网格；双语按配音标签分块
+    if not info.audio_labels and len(shown) == 1:
+        _print_grid(list(shown.values())[0], info, marks)
+        return
+    for key in shown:
+        print(f"{Fore.MAGENTA}【{info.group_label(key)}】{Style.RESET_ALL}")
+        _print_grid(shown[key], info, marks)
+
+
+def _print_grid(eps: list[Episode], info: AnimeInfo, marks: set[int]) -> None:
+    if not eps:
+        warn("  （无剧集）")
+        return
+    maxlen = max(len(str(e.episode)) for e in eps)
     for idx, ep in enumerate(eps):
-        label = info.label(ep)
         mark = "*" if ep.episode in marks else " "
         current = ">" if ep.video_sn == info.current_video_sn else " "
-        print(f"{label:>{maxlen + 2}}{mark}{current}", end="")
+        print(f"{str(ep.episode):>{maxlen + 2}}{mark}{current}", end="")
         if (idx + 1) % 8 == 0:
             print()
     if len(eps) % 8:
@@ -108,18 +131,25 @@ def select_episodes(
     info: AnimeInfo,
     spec: str | None = None,
     interactive: bool = True,
+    group_filter: list[str] | None = None,
 ) -> list[Episode]:
-    """返回用户选定的剧集列表"""
-    eps = info.all_episodes
+    """返回用户选定的剧集列表
+
+    group_filter 限定可选分组（双语作品先选配音再选集）。
+    """
+    eps = info.episodes_of(group_filter) if group_filter else info.all_episodes
     if not eps:
         return []
 
     # 非交互模式：直接按表达式选取
     if not interactive:
-        numbers = parse_selection(spec or "all", len(eps))
+        # 注意：集号上限用「最大集号」而非列表长度，因为双语作品某分组
+        # 的集号可能从 38 开始（如 38~50），用 len() 会错误截断选择范围。
+        total = max((e.episode for e in eps), default=0)
+        numbers = parse_selection(spec or "all", total)
         return _match_numbers(eps, numbers)
 
-    display_table(info)
+    display_table(info, group_filter=group_filter)
 
     default_spec = spec or "all"
     while True:
@@ -151,8 +181,19 @@ def _match_numbers(eps: list[Episode], numbers: list[int]) -> list[Episode]:
     return out
 
 
-def episode_title(info: AnimeInfo, ep: Episode, zerofill: int = 2) -> str:
-    """生成单集文件名（不含清晰度与扩展名）"""
+def episode_title(
+    info: AnimeInfo,
+    ep: Episode,
+    zerofill: int = 2,
+    audio_label: str = "",
+) -> str:
+    """生成单集文件名（不含清晰度与扩展名）
+
+    audio_label 非空时（双语作品）追加 [标签] 以免不同配音版本文件名冲突。
+    """
     name = info.bangumi_name or info.raw_title or "untitled"
     num = str(ep.episode).zfill(max(1, zerofill))
-    return f"{name} - 第{num}集"
+    base = f"{name} - 第{num}集"
+    if audio_label:
+        base += f" [{audio_label}]"
+    return base
