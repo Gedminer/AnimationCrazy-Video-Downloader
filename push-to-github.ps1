@@ -23,7 +23,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$RemoteName = 'fork',
+    [string]$RemoteName = 'origin',
     [string]$Repo = 'AnimationCrazy-Video-Downloader',
     [string]$Branch = '',
     [string]$CommitMessage = ''
@@ -107,6 +107,18 @@ if (-not $Branch) {
 }
 Write-Host "Target branch: $Branch"
 
+# ---- 2b) Resolve the real owner/repo of the target remote ----
+# If the remote already exists, keep its actual owner/repo so we never rewrite the
+# remote to the wrong path (e.g. origin points at Gedminer/..., not $user/...).
+$owner = $user
+$repoName = $Repo
+$existing = (git remote get-url $RemoteName 2>$null)
+if ($existing -and $existing -match 'github\.com[/:]([^/]+)/(.+?)(\.git)?$') {
+    $owner = $matches[1]
+    $repoName = $matches[2]
+    Write-Host "Reusing existing $RemoteName target: $owner/$repoName"
+}
+
 # ---- 3) Optional: commit any pending changes ----
 $status = (git status --porcelain).Trim()
 if ($status) {
@@ -123,14 +135,13 @@ if ($status) {
 }
 
 # ---- 4) Set the temporary token-bearing remote ----
-$tokenUrl = "https://$token@github.com/$user/${Repo}.git"
-$existing = (git remote get-url $RemoteName 2>$null)
+$tokenUrl = "https://$token@github.com/$owner/${repoName}.git"
 if ($existing) {
     git remote set-url $RemoteName $tokenUrl
 } else {
     git remote add $RemoteName $tokenUrl
 }
-Write-Host "Temporarily pointed $RemoteName at the token-bearing URL."
+Write-Host "Temporarily pointed $RemoteName at the token-bearing URL (https://github.com/$owner/${repoName}.git)."
 
 # ---- 5) Push ----
 try {
@@ -140,13 +151,13 @@ try {
 }
 catch {
     # Strip the token even on failure
-    git remote set-url $RemoteName "https://github.com/$user/${Repo}.git"
+    git remote set-url $RemoteName "https://github.com/$owner/${repoName}.git"
     Write-Error "$_ Check: repo exists, token has Contents: Read and write, username/repo correct."
     exit 1
 }
 
 # ---- 6) Strip the token (critical!) ----
-git remote set-url $RemoteName "https://github.com/$user/${Repo}.git"
+git remote set-url $RemoteName "https://github.com/$owner/${repoName}.git"
 Write-Host ''
 Write-Host 'Push succeeded.'
 Write-Host "Done: https://github.com/$user/$Repo"
