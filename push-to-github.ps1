@@ -1,24 +1,21 @@
 <#
 .SYNOPSIS
-    安全地把本仓库推送到你的 GitHub（令牌不经过聊天 / 助手之手）。
+    Securely push this repo to your GitHub (token never passes through anyone).
 
 .DESCRIPTION
-    参考「方案 B：令牌不过我的手」。
-    - 令牌仅在你本机输入，使用 -AsSecureString，输入时不回显，也不经过任何人或日志。
-    - 推送成功后立即把 remote URL 里的令牌抹掉，避免明文留在 .git/config。
-    - 推送目标默认是名为 fork 的远程（不动你原有的 origin / 上游）；
-      想直接推到 origin，运行时加 -RemoteName origin 即可。
+    Scheme B: the token is entered only on your machine via -AsSecureString (no echo,
+    not logged). After a successful push the token is stripped from the remote URL so
+    no plaintext token remains in .git/config.
 
-    前置（必须先在网页完成）：
-      1) 打开 https://github.com/new 建好空仓库（建议 Private，什么都别勾）。
-      2) 打开 https://github.com/settings/personal-access-tokens
-         -> Fine-grained tokens -> Generate new token
-         - Resource owner：你的账号
-         - Repository access：Only select repositories -> 选你刚建的仓库
+    Prerequisites (do these in the GitHub web UI first):
+      1) Create an empty repo at https://github.com/new (Private recommended; do not
+         check any box).
+      2) Generate a Fine-grained PAT:
+         - Resource owner: your account
+         - Repository access: Only select repositories -> your new repo
          - Permissions -> Repository permissions -> Contents: Read and write
-         - Expiration：30 天足够
-         生成后复制 github_pat_...
-      3) 记住你的 GitHub 用户名与该仓库名。
+         - Expiration: 30 days is enough
+      3) Note your GitHub username and the repo name.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File push-to-github.ps1
@@ -34,70 +31,70 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# SecureString -> 明文（仅在本进程内存中，不落盘、不打印）
+# SecureString -> plaintext (only in this process memory; never written to disk or printed)
 function Unsecure([System.Security.SecureString]$s) {
     $ptr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
     try { return [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($ptr) }
     finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
 }
 
-# ---- 1) 收集信息（令牌不回显） ----
-$user = Read-Host 'GitHub 用户名'
-$tokenSecure = Read-Host -AsSecureString 'GitHub 令牌 (Fine-grained PAT, 输入不回显)'
+# ---- 1) Collect input (token is not echoed) ----
+$user = Read-Host 'GitHub username'
+$tokenSecure = Read-Host -AsSecureString 'GitHub token (Fine-grained PAT, input not shown)'
 $token = Unsecure $tokenSecure
 
 if (-not $user -or -not $token) {
-    Write-Error '用户名与令牌均不能为空，已中止。'
+    Write-Error 'Username and token are both required. Aborted.'
     exit 1
 }
 
-# ---- 2) 确定分支 ----
+# ---- 2) Determine branch ----
 if (-not $Branch) {
     $Branch = (git rev-parse --abbrev-ref HEAD).Trim()
 }
-Write-Host "目标分支: $Branch"
+Write-Host "Target branch: $Branch"
 
-# ---- 3) 可选：有未提交改动则提交 ----
+# ---- 3) Optional: commit any pending changes ----
 $status = (git status --porcelain).Trim()
 if ($status) {
     if (-not $CommitMessage) {
-        $CommitMessage = Read-Host '检测到未提交改动，请输入提交信息（留空则用默认）'
+        $CommitMessage = Read-Host 'Uncommitted changes detected. Enter a commit message (blank = default)'
     }
-    if (-not $CommitMessage) { $CommitMessage = 'chore: 更新' }
+    if (-not $CommitMessage) { $CommitMessage = 'chore: update' }
     git add -A
     git commit -m $CommitMessage
-    if ($LASTEXITCODE -ne 0) { Write-Error '提交失败，已中止。'; exit 1 }
-    Write-Host '已提交本地改动。'
+    if ($LASTEXITCODE -ne 0) { Write-Error 'Commit failed. Aborted.'; exit 1 }
+    Write-Host 'Local changes committed.'
 } else {
-    Write-Host '工作区干净，无需提交。'
+    Write-Host 'Working tree clean, no commit needed.'
 }
 
-# ---- 4) 设置带令牌的 remote（临时） ----
-$tokenUrl = "https://$token@github.com/$user/$Repo.git"
+# ---- 4) Set the temporary token-bearing remote ----
+$tokenUrl = "https://$token@github.com/$user/${Repo}.git"
 $existing = (git remote get-url $RemoteName 2>$null)
 if ($existing) {
     git remote set-url $RemoteName $tokenUrl
 } else {
     git remote add $RemoteName $tokenUrl
 }
-Write-Host "已临时将 $RemoteName 指向带令牌的地址。"
+Write-Host "Temporarily pointed $RemoteName at the token-bearing URL."
 
-# ---- 5) 推送 ----
+# ---- 5) Push ----
 try {
-    Write-Host '正在推送...'
+    Write-Host 'Pushing...'
     git push -u $RemoteName $Branch
-    if ($LASTEXITCODE -ne 0) { throw 'git push 返回非零退出码。' }
+    if ($LASTEXITCODE -ne 0) { throw 'git push returned a non-zero exit code.' }
 }
 catch {
-    # 即使失败也尽量抹掉令牌
-    git remote set-url $RemoteName "https://github.com/$user/$Repo.git"
-    Write-Error "$_ 请检查：仓库是否已建好、令牌权限是否为 Contents: Read and write、用户名/仓库名是否正确。"
+    # Strip the token even on failure
+    git remote set-url $RemoteName "https://github.com/$user/${Repo}.git"
+    Write-Error "$_ Check: repo exists, token has Contents: Read and write, username/repo correct."
     exit 1
 }
 
-# ---- 6) 抹掉令牌（关键！） ----
-git remote set-url $RemoteName "https://github.com/$user/$Repo.git"
+# ---- 6) Strip the token (critical!) ----
+git remote set-url $RemoteName "https://github.com/$user/${Repo}.git"
 Write-Host ''
-Write-Host '推送成功。'
-Write-Host "完成：https://github.com/$user/$Repo"
-Write-Host '（已抹掉 remote URL 中的令牌，.git/config 不再含明文令牌）'
+Write-Host 'Push succeeded.'
+Write-Host "Done: https://github.com/$user/$Repo"
+Write-Host '(Token stripped from the remote URL; .git/config no longer contains a plaintext token.)'
