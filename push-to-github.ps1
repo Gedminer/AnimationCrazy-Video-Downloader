@@ -103,7 +103,7 @@ if ($token -match 'https?://' -or $token -match '@') {
 
 # ---- 2) Determine branch ----
 if (-not $Branch) {
-    $Branch = (git rev-parse --abbrev-ref HEAD).Trim()
+    $Branch = (git rev-parse --abbrev-ref HEAD | Out-String).Trim()
 }
 Write-Host "Target branch: $Branch"
 
@@ -120,7 +120,7 @@ if ($existing -and $existing -match 'github\.com[/:]([^/]+)/(.+?)(\.git)?$') {
 }
 
 # ---- 3) Optional: commit any pending changes ----
-$status = (git status --porcelain).Trim()
+$status = (git status --porcelain | Out-String).Trim()
 if ($status) {
     if (-not $CommitMessage) {
         $CommitMessage = Read-Host 'Uncommitted changes detected. Enter a commit message (blank = default)'
