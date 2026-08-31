@@ -31,6 +31,43 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Locate git.exe (it may not be on PATH in this PowerShell session)
+function Find-Git {
+    $c = Get-Command git -ErrorAction SilentlyContinue
+    if ($c) { return $c.Source }
+    $candidates = @(
+        "$env:ProgramFiles\Git\cmd\git.exe",
+        "$env:ProgramFiles\Git\bin\git.exe",
+        "${env:ProgramFiles(x86)}\Git\cmd\git.exe",
+        "${env:ProgramFiles(x86)}\Git\bin\git.exe",
+        "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe",
+        "$env:LOCALAPPDATA\Programs\Git\bin\git.exe",
+        "$env:LOCALAPPDATA\.workbuddy\binaries\PortableGit\versions\1.2.0\bin\git.exe"
+    )
+    foreach ($p in $candidates) {
+        if ($p -and (Test-Path $p)) { return $p }
+    }
+    $pg = "$env:LOCALAPPDATA\.workbuddy\binaries\PortableGit\versions"
+    if (Test-Path $pg) {
+        $found = Get-ChildItem -Path $pg -Recurse -Filter git.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+    foreach ($dir in ($env:PATH -split ';')) {
+        $g = Join-Path $dir 'git.exe'
+        if ($g -and (Test-Path $g)) { return $g }
+    }
+    return $null
+}
+
+$gitExe = Find-Git
+if (-not $gitExe) {
+    Write-Error 'git not found. Install Git for Windows (https://git-scm.com) or add its bin directory to PATH.'
+    exit 1
+}
+# Put git on PATH for the rest of this script
+$env:PATH = "$(Split-Path -Parent $gitExe);$env:PATH"
+Write-Host "Using git: $gitExe"
+
 # SecureString -> plaintext (only in this process memory; never written to disk or printed)
 function Unsecure([System.Security.SecureString]$s) {
     $ptr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
