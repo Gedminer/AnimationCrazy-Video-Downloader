@@ -50,14 +50,26 @@ def _full_chromium_exe() -> str | None:
     其功能不全、易被动画疯反爬识别导致广告不推进。改用完整 chromium 的
     chrome.exe + 无头模式可规避该问题。返回 None 表示未找到。
     """
-    base = os.path.expandvars(r"%LOCALAPPDATA%\ms-playwright")
-    if not os.path.isdir(base):
-        return None
-    matches = sorted(
-        glob.glob(os.path.join(base, "chromium-*", "chrome-win*", "chrome.exe")),
-        reverse=True,
-    )
-    return matches[0] if matches else None
+    # 便携优先：PLAYWRIGHT_BROWSERS_PATH 或 exe 同级的 ms-playwright
+    candidates = []
+    pb = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if pb and pb != "0":
+        candidates.append(pb)
+    try:
+        # 冻结后 browser.py 位于 _internal/acdl/，用脚本/exe 所在目录的上两级兜底
+        candidates.append(str(Path(__file__).resolve().parent.parent / "ms-playwright"))
+    except Exception:  # noqa: BLE001
+        pass
+    candidates.append(os.path.expandvars(r"%LOCALAPPDATA%\ms-playwright"))
+    for base in candidates:
+        if base and os.path.isdir(base):
+            matches = sorted(
+                glob.glob(os.path.join(base, "chromium-*", "chrome-win*", "chrome.exe")),
+                reverse=True,
+            )
+            if matches:
+                return matches[0]
+    return None
 
 
 class BrowserSession:

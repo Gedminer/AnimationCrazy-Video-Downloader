@@ -34,11 +34,21 @@ from acdl.utils import (  # noqa: E402
     ask, countdown, error, info, ok, sanitize, step, warn,
 )
 
-ROOT = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    # PyInstaller 单目录打包：ac-dl.exe 位于 dist/ac-dl/ac-dl.exe，
+    # 资源（tools/、ms-playwright/、ffmpeg、config）与本目录同级。
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent
 NEW_RE = ROOT / "tools" / "N_m3u8DL-RE" / "N_m3u8DL-RE.exe"
 OLD_RE = ROOT / "re.exe"
 PROFILE_DIR = ROOT / ".auth" / "chrome-profile"
 TMP_DIR = ROOT / ".cache" / "tmp"
+
+# 便携版：若同目录存在 ms-playwright 则优先用它（否则走默认 LOCALAPPDATA，开发期不受影响）
+_portable_pw = ROOT / "ms-playwright"
+if _portable_pw.is_dir():
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_portable_pw)
 
 
 # ---------------------------------------------------------------- 工具

@@ -14,3 +14,7 @@ config.ini
 __pycache__/
 *.pyc
 .env
+
+# 打包产物（PyInstaller onedir）
+dist/
+build/
