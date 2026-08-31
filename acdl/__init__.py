@@ -1,6 +1,6 @@
 """AnimationCrazy Video Downloader (ac-dl)"""
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 BASE_URL = "https://ani.gamer.com.tw"
 PLAY_URL = BASE_URL + "/animeVideo.php"
