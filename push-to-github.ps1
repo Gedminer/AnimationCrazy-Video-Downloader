@@ -77,11 +77,16 @@ function Unsecure([System.Security.SecureString]$s) {
 
 # ---- 1) Collect input (token is not echoed) ----
 $user = Read-Host 'GitHub username'
-$tokenSecure = Read-Host -AsSecureString 'GitHub token (Fine-grained PAT, input not shown)'
+$tokenSecure = Read-Host -AsSecureString 'GitHub token (paste ONLY the github_pat_... string, NOT a URL)'
 $token = Unsecure $tokenSecure
 
 if (-not $user -or -not $token) {
     Write-Error 'Username and token are both required. Aborted.'
+    exit 1
+}
+# Guard: the token must be the raw github_pat_... string, not a full URL
+if ($token -match 'https?://' -or $token -match '@') {
+    Write-Error 'Token looks like a URL. Paste ONLY the github_pat_... string, not https://...@github.com/... . Aborted.'
     exit 1
 }
 
