@@ -3,6 +3,8 @@
 > 一个用于下载巴哈姆特**动画疯**（ani.gamer.com.tw）视频的命令行工具。
 > 本项目无任何商业用途，仅为个人学习、方便个人使用。使用或转发时请标明原作者（CrymanChen）。
 
+📘 **新手？先看 [使用教程](使用教程.md)。**
+
 ---
 
 ## 一、项目简介
@@ -313,6 +315,23 @@ A：设置环境变量 `ACDL_SHOW_CLI=0`，下载器输出将写入 `<保存名>
 - Cookie 属于敏感凭据，已通过 `.gitignore` 排除，请勿提交到仓库。
 - 批量连续请求存在账号风控风险，程序默认串行 + 集间冷却以降低风险。
 - 请遵守动画疯平台的服务条款与当地法律法规。
+
+---
+
+## 十二、推送到 GitHub（PowerShell）
+
+贡献者把本项目推到自己仓库时，可用附带的 `push-to-github.ps1`，采用**令牌不经过任何人**的方式：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File push-to-github.ps1
+```
+
+脚本会在你本机提示输入 GitHub 用户名与令牌（`-AsSecureString`，输入不回显），
+用 `https://<TOKEN>@github.com/<用户>/<仓库>.git` 临时作为 remote 地址推送，
+**推送成功后立即 `git remote set-url` 抹掉令牌**，避免明文留在 `.git/config`。
+前置：在 GitHub 网页建好空仓库、生成 Fine-grained PAT（Contents: Read and write，作用域仅该仓库）。
+默认推到名为 `fork` 的远程（不动原有 `origin`）；想直接推到 `origin` 加 `-RemoteName origin` 即可。
+详见脚本头部注释。
 
 ---
 
