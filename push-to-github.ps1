@@ -41,15 +41,25 @@ function Find-Git {
         "${env:ProgramFiles(x86)}\Git\cmd\git.exe",
         "${env:ProgramFiles(x86)}\Git\bin\git.exe",
         "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe",
-        "$env:LOCALAPPDATA\Programs\Git\bin\git.exe",
-        "$env:LOCALAPPDATA\.workbuddy\binaries\PortableGit\versions\1.2.0\bin\git.exe"
+        "$env:LOCALAPPDATA\Programs\Git\bin\git.exe"
     )
     foreach ($p in $candidates) {
         if ($p -and (Test-Path $p)) { return $p }
     }
-    $pg = "$env:LOCALAPPDATA\.workbuddy\binaries\PortableGit\versions"
-    if ($pg -and (Test-Path $pg)) {
-        $found = Get-ChildItem -Path $pg -Recurse -Filter git.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    # WorkBuddy bundled PortableGit lives under USERPROFILE\.workbuddy (NOT LOCALAPPDATA)
+    $pgBase = "$env:USERPROFILE\.workbuddy\binaries\PortableGit\versions"
+    if (Test-Path $pgBase) {
+        foreach ($v in (Get-ChildItem -Path $pgBase -Directory -ErrorAction SilentlyContinue)) {
+            foreach ($sub in @('cmd', 'bin', 'mingw64\bin')) {
+                $g = Join-Path (Join-Path $v.FullName $sub) 'git.exe'
+                if (Test-Path $g) { return $g }
+            }
+        }
+    }
+    # Fallback: any git.exe under .workbuddy\binaries
+    $wb = "$env:USERPROFILE\.workbuddy\binaries"
+    if (Test-Path $wb) {
+        $found = Get-ChildItem -Path $wb -Recurse -Filter git.exe -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) { return $found.FullName }
     }
     foreach ($dir in ($env:PATH -split ';')) {
