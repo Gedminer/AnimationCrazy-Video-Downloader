@@ -48,11 +48,12 @@ function Find-Git {
         if ($p -and (Test-Path $p)) { return $p }
     }
     $pg = "$env:LOCALAPPDATA\.workbuddy\binaries\PortableGit\versions"
-    if (Test-Path $pg) {
+    if ($pg -and (Test-Path $pg)) {
         $found = Get-ChildItem -Path $pg -Recurse -Filter git.exe -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) { return $found.FullName }
     }
     foreach ($dir in ($env:PATH -split ';')) {
+        if (-not $dir) { continue }
         $g = Join-Path $dir 'git.exe'
         if ($g -and (Test-Path $g)) { return $g }
     }
