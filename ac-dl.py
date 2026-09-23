@@ -559,6 +559,13 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--resolution", default=None, help="指定清晰度，如 1080")
     common.add_argument("--re-path", default=None, help="N_m3u8DL-RE 可执行文件路径")
     common.add_argument("-y", "--yes", action="store_true", help="非交互模式")
+    common.add_argument("--audio", "--lang", dest="audio", default=None,
+                        help="配音类型：分组键(0/3)、名称片段(中文/原音/日语) 或 all(两种都下)；缺省=该 sn 所属语种")
+    common.add_argument("--select", default="all",
+                        help="选集表达式：all / 1-12 / 1,3,5-8 / 8- / last")
+    common.add_argument("--dump-json", default=None, help="导出剧集列表为 JSON 的路径")
+    common.add_argument("--timeout", type=int, default=600, help="等待登录的秒数")
+    common.add_argument("--reset", action="store_true", help="重置为默认配置")
 
     parser = argparse.ArgumentParser(
         prog="ac-dl.py",
@@ -583,29 +590,20 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     p = sub.add_parser("login", parents=[common], help="登录动画疯")
-    p.add_argument("--timeout", type=int, default=600, help="等待登录的秒数")
 
     sub.add_parser("logout", parents=[common], help="清除本地登录态")
 
     p = sub.add_parser("info", parents=[common], help="查看作品与剧集列表")
     p.add_argument("target", help="播放页/作品页 URL 或 sn 号")
-    p.add_argument("--dump-json", default=None, help="导出剧集列表为 JSON")
 
     p = sub.add_parser("dl", parents=[common], help="下载单集")
     p.add_argument("target", help="播放页 URL 或 sn 号")
-    p.add_argument("--audio", "--lang", dest="audio", default=None,
-                   help="配音类型：分组键(0/3)、名称片段(中文/原音/日语) 或 all(两种都下)；缺省=该 sn 所属语种")
 
     p = sub.add_parser("batch", parents=[common], help="批量下载剧集")
     p.add_argument("target", help="作品页/播放页 URL 或 sn 号")
-    p.add_argument("--select", default="all",
-                   help="选集表达式：all / 1-12 / 1,3,5-8 / 8- / last")
-    p.add_argument("--audio", "--lang", dest="audio", default=None,
-                   help="配音类型：分组键(0/3)、名称片段(中文/原音/日语) 或 all(两种都下)；缺省=交互选择/默认配置")
 
     p = sub.add_parser("manual", parents=[common], help="手动输入模式（旧版回退）")
-    sub.add_parser("config", parents=[common], help="查看配置").add_argument(
-        "--reset", action="store_true", help="重置为默认配置")
+    sub.add_parser("config", parents=[common], help="查看配置")
 
     parser.set_defaults(command="menu")
     return parser
@@ -644,10 +642,16 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         warn("\n已中断")
         return 130
-    except Exception as exc:  # noqa: BLE001
-        error(f"未预期的错误: {exc}")
-        if "-v" in (argv or sys.argv):
-            raise
+    except SystemExit:
+        raise
+    except Exception:  # noqa: BLE001
+        import traceback as _tb
+        sys.stderr.write("\n=== 发生未捕获异常（请把下面内容发给我）===\n")
+        _tb.print_exc()
+        try:
+            input("\n按回车退出...")
+        except Exception:  # noqa: BLE001
+            pass
         return 1
 
 
