@@ -534,10 +534,23 @@ def cmd_menu(cfg: Config, args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--config", default="config.ini", help="配置文件路径")
+    common.add_argument("--mode", choices=("profile", "cdp"), default="profile",
+                        help="登录态方式：profile=持久化目录，cdp=接管已开 Chrome")
+    common.add_argument("--cdp-port", type=int, default=None, help="CDP 远程调试端口")
+    common.add_argument("--headless", action="store_true", help="无头模式（可能影响取流）")
+    common.add_argument("--cookie", default="", help="手动指定 Cookie 请求头字符串")
+    common.add_argument("--save-dir", default=None, help="输出根目录")
+    common.add_argument("--resolution", default=None, help="指定清晰度，如 1080")
+    common.add_argument("--re-path", default=None, help="N_m3u8DL-RE 可执行文件路径")
+    common.add_argument("-y", "--yes", action="store_true", help="非交互模式")
+
     parser = argparse.ArgumentParser(
         prog="ac-dl.py",
         description="动画疯视频下载器（自动取流 + 批量下载）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[common],
         epilog=(
             "示例:\n"
             "  ac-dl.py login                        首次登录\n"
@@ -552,18 +565,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--version", action="version", version=f"ac-dl {__version__}")
-
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--config", default="config.ini", help="配置文件路径")
-    common.add_argument("--mode", choices=("profile", "cdp"), default="profile",
-                        help="登录态方式：profile=持久化目录，cdp=接管已开 Chrome")
-    common.add_argument("--cdp-port", type=int, default=None, help="CDP 远程调试端口")
-    common.add_argument("--headless", action="store_true", help="无头模式（可能影响取流）")
-    common.add_argument("--cookie", default="", help="手动指定 Cookie 请求头字符串")
-    common.add_argument("--save-dir", default=None, help="输出根目录")
-    common.add_argument("--resolution", default=None, help="指定清晰度，如 1080")
-    common.add_argument("--re-path", default=None, help="N_m3u8DL-RE 可执行文件路径")
-    common.add_argument("-y", "--yes", action="store_true", help="非交互模式")
 
     sub = parser.add_subparsers(dest="command")
 
