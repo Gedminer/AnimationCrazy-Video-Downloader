@@ -20,22 +20,36 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
-from colorama import Fore, Style, init  # noqa: E402
+try:
+    from colorama import Fore, Style, init  # noqa: E402
 
-init()
+    init()
 
-from acdl import __version__  # noqa: E402
-from acdl.api import AniClient  # noqa: E402
-from acdl.browser import BrowserSession  # noqa: E402
-from acdl.config import Config, load, save  # noqa: E402
-from acdl.downloader import Downloader, TaskResult, summarize  # noqa: E402
-from acdl.extractor import StreamExtractor, sn_from_url  # noqa: E402
-from acdl.series import (  # noqa: E402
-    _match_numbers, display_table, episode_title, parse_selection, select_episodes,
-)
-from acdl.utils import (  # noqa: E402
-    ask, countdown, error, info, ok, sanitize, step, warn,
-)
+    from acdl import __version__  # noqa: E402
+    from acdl.api import AniClient  # noqa: E402
+    from acdl.browser import BrowserSession  # noqa: E402
+    from acdl.config import Config, load, save  # noqa: E402
+    from acdl.downloader import Downloader, TaskResult, summarize  # noqa: E402
+    from acdl.extractor import StreamExtractor, sn_from_url  # noqa: E402
+    from acdl.series import (  # noqa: E402
+        _match_numbers, display_table, episode_title, parse_selection, select_episodes,
+    )
+    from acdl.utils import (  # noqa: E402
+        ask, countdown, error, info, ok, sanitize, step, warn,
+    )
+except ImportError as exc:
+    sys.stderr.write(
+        "ERROR: 缺少运行依赖：%s\n\n"
+        "ac-dl.py 需要 colorama / playwright / requests / beautifulsoup4。\n"
+        "请二选一：\n"
+        "  1) 安装依赖：  pip install -r requirements.txt\n"
+        "  2) 直接用便携版（免依赖）：双击 ac-dl.exe 或 ac-dl.bat\n" % exc
+    )
+    try:
+        input("按回车退出...")
+    except Exception:  # noqa: BLE001
+        pass
+    sys.exit(1)
 
 if getattr(sys, "frozen", False):
     # PyInstaller 单目录打包：ac-dl.exe 位于 dist/ac-dl/ac-dl.exe，
