@@ -130,10 +130,18 @@ def cmd_login(cfg: Config, args) -> int:
         finally:
             session.stop()
 
-    session = BrowserSession(cfg, mode="profile", profile_dir=PROFILE_DIR)
+    # 交互登录必须可见：headless 时用户看不到窗口，永远无法完成登录。
+    # 这里强制 headless=False，忽略配置里的 headless=True。
+    if getattr(args, "headless", False) and not args.headful:
+        warn("交互登录需要可见窗口，忽略 --headless 强制有头模式")
+    session = BrowserSession(
+        cfg, mode="profile", profile_dir=PROFILE_DIR, headless=False
+    )
+    info(f"登录状态将持久化保存到: {PROFILE_DIR}")
     try:
         session.start()
         if session.interactive_login(timeout=args.timeout):
+            ok(f"登录态已保存，以后下载无需再次登录（如失效可运行 ac-dl.py logout 或重新 login）")
             return 0
         return 1
     finally:
@@ -394,7 +402,7 @@ def cmd_download(cfg: Config, args, batch: bool = False) -> int:
         mode=args.mode,
         profile_dir=PROFILE_DIR,
         cdp_port=args.cdp_port,
-        headless=args.headless or cfg.headless,
+        headless=(not args.headful) and cfg.headless,
     )
     session.start()
     extractor = StreamExtractor(cfg)
@@ -554,6 +562,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="登录态方式：profile=持久化目录，cdp=接管已开 Chrome")
     common.add_argument("--cdp-port", type=int, default=None, help="CDP 远程调试端口")
     common.add_argument("--headless", action="store_true", help="无头模式（可能影响取流）")
+    common.add_argument("--headful", action="store_true",
+                        help="强制显示浏览器窗口（覆盖配置里的 headless=True）")
     common.add_argument("--cookie", default="", help="手动指定 Cookie 请求头字符串")
     common.add_argument("--save-dir", default=None, help="输出根目录")
     common.add_argument("--resolution", default=None, help="指定清晰度，如 1080")
