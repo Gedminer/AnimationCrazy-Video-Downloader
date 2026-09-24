@@ -128,14 +128,22 @@ class BrowserSession:
             args=_CHROME_ARGS,
             ignore_https_errors=True,
         )
-        # 无头模式改用完整 Chromium（而非残缺的 headless_shell），规避动画疯反爬
-        if self.headless:
-            full = _full_chromium_exe()
-            if full:
-                launch_kwargs["executable_path"] = full
-                info(f"无头模式使用完整 Chromium: {full}")
-            else:
-                warn("未找到完整 Chromium，回退到 Playwright 默认无头内核（可能被反爬拦截）")
+        # 始终显式锁定「完整 Chromium」，而不是让 Playwright 按自身版本去解析内核：
+        # 1) 规避残缺的 headless_shell（功能不全，易被动画疯反爬、广告不推进）
+        # 2) 规避「已装 playwright 版本」与「本地已下载 chromium 版本」不匹配。
+        #    典型报错：Executable doesn't exist at ...\chromium-1243\chrome-win64\chrome.exe
+        #    —— 例如本机 playwright 1.63 要求 1243，但 ms-playwright 下只有 1234。
+        #    注意：有头模式同样要走这里，否则会退化成按默认解析而踩到上述版本不匹配。
+        full = _full_chromium_exe()
+        if full:
+            launch_kwargs["executable_path"] = full
+            info(f"使用完整 Chromium: {full}")
+        else:
+            warn(
+                "未找到完整 Chromium（请在 ms-playwright 下放 chromium-*）。"
+                "将使用 Playwright 默认内核；若报 'Executable doesn't exist' "
+                "请执行 playwright install chromium"
+            )
 
         return self._pw.chromium.launch_persistent_context(**launch_kwargs)
 
