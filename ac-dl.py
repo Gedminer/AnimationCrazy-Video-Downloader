@@ -388,7 +388,7 @@ def cmd_download(cfg: Config, args, batch: bool = False) -> int:
         print(f"  - {episode_title(anime, e, cfg.zerofill, audio_label=label)}  (sn={e.video_sn})")
     if not args.yes:
         if ask("确认开始下载？(y/n)", "y").lower() not in ("y", "yes", ""):
-            info("已取消")
+            info("已取消本次下载，返回主菜单")
             return 0
 
     save_root = Path(args.save_dir or cfg.save_dir)
@@ -404,14 +404,16 @@ def cmd_download(cfg: Config, args, batch: bool = False) -> int:
         cdp_port=args.cdp_port,
         headless=(not args.headful) and cfg.headless,
     )
-    session.start()
     extractor = StreamExtractor(cfg)
 
     results: list[TaskResult] = []
     started = time.time()
     try:
+        session.start()
         if args.mode != "cdp":
-            session.ensure_login(allow_interactive=not args.yes)
+            if not session.ensure_login(allow_interactive=not args.yes):
+                warn("未登录，已取消本次下载（可在主菜单选 4 登录后再试）")
+                return 2
 
         cookies = []
         try:
@@ -513,43 +515,74 @@ def cmd_config(cfg: Config, args) -> int:
 
 
 def cmd_menu(cfg: Config, args) -> int:
-    """交互式主菜单"""
-    print(f"\n{Style.BRIGHT}动画疯下载器 ac-dl v{__version__}{Style.RESET_ALL}")
-    print("  1. 批量下载整部作品")
-    print("  2. 下载单集")
-    print("  3. 查看作品剧集列表")
-    print("  4. 登录 / 重新登录")
-    print("  5. 查看配置")
-    print("  6. 手动输入模式（旧版）")
-    print("  0. 退出")
+    """交互式主菜单
 
-    choice = ask("请选择", "1")
-    if choice == "1":
-        target = ask("请输入作品页/播放页 URL 或 sn 号")
-        if not target:
+    每次操作结束后都会**回到本菜单**，只有选择 0 才退出。
+    子步骤中留空 / 选择 n 只会取消当前操作并返回菜单，不会直接关闭脚本。
+    """
+    while True:
+        print(f"\n{Style.BRIGHT}动画疯下载器 ac-dl v{__version__}{Style.RESET_ALL}")
+        print("  1. 批量下载整部作品")
+        print("  2. 下载单集")
+        print("  3. 查看作品剧集列表")
+        print("  4. 登录 / 重新登录")
+        print("  5. 查看配置")
+        print("  6. 手动输入模式（旧版）")
+        print("  0. 退出")
+
+        try:
+            choice = ask("请选择", "0")
+        except KeyboardInterrupt:
+            print()
+            info("已取消输入，返回主菜单（输入 0 可退出）")
+            continue
+
+        if choice in ("0", "q", "quit", "exit", "退出"):
             return 0
-        args.target = target
-        args.select = ask("要下载哪些集？（如 1-12 / 1,3,5-8 / all / 8-）", "all")
-        return cmd_download(cfg, args, batch=True)
-    if choice == "2":
-        target = ask("请输入播放页 URL 或 sn 号")
-        if not target:
-            return 0
-        args.target = target
-        return cmd_download(cfg, args, batch=False)
-    if choice == "3":
-        target = ask("请输入作品页/播放页 URL 或 sn 号")
-        if not target:
-            return 0
-        args.target = target
-        return cmd_info(cfg, args)
-    if choice == "4":
-        return cmd_login(cfg, args)
-    if choice == "5":
-        return cmd_config(cfg, args)
-    if choice == "6":
-        return cmd_manual(cfg, args)
-    return 0
+
+        try:
+            if choice == "1":
+                target = ask("请输入作品页/播放页 URL 或 sn 号")
+                if not target:
+                    info("未输入，返回主菜单")
+                    continue
+                args.target = target
+                args.select = ask("要下载哪些集？（如 1-12 / 1,3,5-8 / all / 8-）", "all")
+                cmd_download(cfg, args, batch=True)
+            elif choice == "2":
+                target = ask("请输入播放页 URL 或 sn 号")
+                if not target:
+                    info("未输入，返回主菜单")
+                    continue
+                args.target = target
+                args.select = "all"
+                cmd_download(cfg, args, batch=False)
+            elif choice == "3":
+                target = ask("请输入作品页/播放页 URL 或 sn 号")
+                if not target:
+                    info("未输入，返回主菜单")
+                    continue
+                args.target = target
+                cmd_info(cfg, args)
+            elif choice == "4":
+                cmd_login(cfg, args)
+            elif choice == "5":
+                cmd_config(cfg, args)
+            elif choice == "6":
+                cmd_manual(cfg, args)
+            else:
+                warn(f"无效选项：{choice}")
+                continue
+        except KeyboardInterrupt:
+            print()
+            info("已取消当前操作，返回主菜单")
+            continue
+        except Exception as exc:  # noqa: BLE001
+            error(f"操作出错：{exc}")
+            continue
+
+        print()
+        info("操作结束，已返回主菜单（输入 0 可退出）")
 
 
 # ---------------------------------------------------------------- 入口

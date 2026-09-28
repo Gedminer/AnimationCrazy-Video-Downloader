@@ -288,7 +288,13 @@ class BrowserSession:
         return hits
 
     def interactive_login(self, timeout: int = 600) -> bool:
-        """打开登录页，等待用户手动完成登录后自动继续"""
+        """打开登录页，等待用户手动完成登录后自动继续。
+
+        重要：轮询期间**不能**对登录页做任何导航。
+        check_login(page) 会 goto 动画疯首页，若每隔几秒调用一次，用户正在
+        填写的登录页会被反复刷掉，表现为「页面不停刷新、必须极快才能登录」。
+        因此这里改为只读 Cookie 判断，登录页在用户操作期间保持不动。
+        """
         page = self.new_page()
         step("请在打开的浏览器窗口中登录巴哈姆特动画疯")
         try:
@@ -296,19 +302,28 @@ class BrowserSession:
         except Exception as exc:  # noqa: BLE001
             warn(f"打开登录页失败: {exc}")
 
-        print("登录完成后本程序会自动继续；等待中（Ctrl+C 可取消）...")
+        # 持久化 Profile 里已有登录态则直接放行，不再打扰
+        hits = self._login_cookie_names()
+        if hits:
+            ok(f"已检测到登录态（Cookie: {', '.join(hits[:3])}），无需重复登录")
+            return True
+
+        print("登录页不会自动刷新，可从容填写；登录完成后程序会自动继续（Ctrl+C 可取消）...")
         deadline = time.time() + timeout
         last_dot = 0
         while time.time() < deadline:
-            logged, reason = self.check_login(page)
-            if logged:
-                ok(f"登录成功（{reason}）")
-                return True
+            # 只读 Cookie，绝不导航登录页
+            if self._login_cookie_names():
+                # 命中后再做一次完整校验（另开临时页并自动关闭，不影响登录页）
+                logged, reason = self.check_login()
+                if logged:
+                    ok(f"登录成功（{reason}）")
+                    return True
             now = int(time.time() - (deadline - timeout))
             if now != last_dot:
                 last_dot = now
                 print(f"\r  已等待 {now}s ...", end="", flush=True)
-            time.sleep(3)
+            time.sleep(2)
 
         print()
         error(f"等待登录超时（{timeout}s），未检测到登录态。")
@@ -328,8 +343,12 @@ class BrowserSession:
             error("CDP 模式下请在被接管的 Chrome 中完成登录后重试。")
             return False
 
-        print("\n是否现在打开浏览器登录？(y/n)")
-        choice = input("  > ").strip().lower()
+        print("\n是否现在打开浏览器登录？（y=打开浏览器登录 / n=取消本次下载并返回主菜单）")
+        try:
+            choice = input("  > ").strip().lower()
+        except (EOFError, KeyboardInterrupt):  # 用户取消了输入
+            print()
+            return False
         if choice not in ("y", "yes", ""):
             return False
         return self.interactive_login()
